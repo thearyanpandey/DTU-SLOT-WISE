@@ -6,7 +6,7 @@ import { Upload, FileSpreadsheet, Loader2 } from 'lucide-react';
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
-  const [courses, setCourses] = useState('PE302, PE304, HU302, E1, E5');
+  const [courses, setCourses] = useState('PE302, PE304, HU302, E1, E2, E3');
   const [group, setGroup] = useState('G3');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
