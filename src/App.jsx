@@ -16,7 +16,7 @@ import {
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
-  const [courses, setCourses] = useState('PE302, PE304, HU302, E1, E2, E3');
+  const [courses, setCourses] = useState('PE302, PE304, HU302, E1, E2, E4');
   const [group, setGroup] = useState('G3');
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
