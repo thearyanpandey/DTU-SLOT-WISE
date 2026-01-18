@@ -1,162 +1,84 @@
 import { GoogleGenAI } from "@google/genai";
 
 // Main function connected to App.jsx
-export const parseTimetable = async (apiKey, files, courses, group) => {
+export const parseTimetable = async (apiKey, files) => {
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey });
+
     
-    // Convert Files to Images
-    const images = await Promise.all(files.map(f => fileToImage(f)));
+    const imageParts = await Promise.all(files.map(f => fileToGenerativePart(f)));
 
-    // STEP 1: SCOUT
-    console.log("🕵️ Scouting layout...");
-    const layout = await detectLayout(ai, images[0]);
-    console.log("✅ Layout detected");
+    console.log("🚀 Sending images to Gemini for Raw Extraction...");
 
-    let allExtractedText = "";
-    const days = ['MON', 'TUE', 'WED', 'THU', 'FRI'];
+    
+    const prompt = `
+      You are a raw data extractor for university timetables.
+      I have uploaded ${files.length} image(s) of timetable grids.
+      
+      TASK:
+      Convert the visual grid into a comprehensive, flat JSON list representing every active time slot. Do NOT filter any data.
 
-    // Extract header once
-    const headerImg = await cropImage(images[layout.header.fileIndex], layout.header.coords);
+      INSTRUCTIONS:
+      1.  **Analyze Grid:** Identify the headers defining Days (rows: MON, TUE...) and Times (columns: 8-9, 9-10...).
+      2.  **Iterate & Extract:** Go through every intersection of Day and Time.
+      3.  **Handling Multiple Items in One Slot (Vertical Stacking):**
+          - Many grid cells contain multiple distinct classes stacked vertically.
+          - Extract all text for *each* distinct stack item.
+          - Join these distinct items together using exactly this separator: " || " (space pipe pipe space).
+      4.  **Handling Time Spans (Horizontal Spanning):**
+          - If a single visual block spans across multiple column headers (e.g., a Lab block 10-12), generate SEPARATE JSON entries for each hourly interval (e.g., one for 10-11, one for 11-12).
+          - Both entries should contain the same raw content text.
+      5.  **Content:** The "raw_content" string should include EVERYTHING in that block: course codes, type (L/P), professors, rooms.
 
-    // STEP 2: PROCESS EACH DAY
-    for (const day of days) {
-      if (!layout.days[day]) {
-        console.log(`⚠️ Skipping ${day} (Not found in images)`);
-        continue;
+      OUTPUT FORMAT (JSON Array ONLY):
+      [
+        { "day": "MON", "time": "8-9", "raw_content": "E1 L PE308 GET PROF.NAVEEN || L PE308 GET PROF.ANIL" },
+        { "day": "MON", "time": "11-12", "raw_content": "P PE 302 LAB G1 MUKESH S D" },
+        { "day": "MON", "time": "12-1", "raw_content": "P PE 302 LAB G1 MUKESH S D" }
+      ]
+      
+      Return only valid JSON.
+    `;
+
+    
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview", // Switched to a standard valid model name
+      contents: [
+        // Map images to the format expected by this SDK
+        ...imageParts.map(part => ({ 
+            inlineData: { 
+                mimeType: part.mimeType, 
+                data: part.data 
+            } 
+        })),
+        { text: prompt }
+      ],
+      generationConfig: { 
+          responseMimeType: "application/json" 
       }
+    });
 
-      console.log(`Processing ${day}...`);
-      
-      const dayRowImg = await cropImage(
-        images[layout.days[day].fileIndex], 
-        layout.days[day].coords
-      );
-      
-      const stitchedBase64 = await stitchImages(headerImg, dayRowImg);
-      
-      // B. Extract Data (Now returns STRING)
-      let dayJsonString = await extractDayData(ai, day, stitchedBase64);
-      
-      // C. Verify Data (Passes STRING)
-      // We wrap this in a try/catch so verification failure doesn't crash the whole app
-      try {
-        const verification = await verifyExtraction(ai, day, stitchedBase64, dayJsonString);
-        if (verification.hasErrors) {
-          console.log(`🔴 Correction found for ${day}: ${verification.correction}`);
-          // Append note to the JSON string (simple hack for now)
-          // Ideally, we would re-parse and add it, but appending a comment works for the parser
-          // Since the parser uses regex to find [], we can just log it or append text outside
-        }
-      } catch (verifyError) {
-        console.warn(`Verification failed for ${day}, proceeding with extracted data.`);
-      }
+    
+    const jsonString = cleanJsonString(response.text);
+    let parsedData = JSON.parse(jsonString);
 
-      allExtractedText += dayJsonString + "\n";
+    if (!Array.isArray(parsedData)) {
+        console.warn("AI did not return an array. Attempting to wrap.");
+        parsedData = [parsedData];
     }
 
-    // STEP 3: Parse
-    return parseFromExtractedText(allExtractedText, courses, group);
+    console.log(`✅ Extracted ${parsedData.length} raw time slots.`);
+    return parsedData;
 
   } catch (error) {
-    console.error("Fatal Error in Processor:", error);
-    throw error;
+    console.error("Raw Processor Error:", error);
+    throw error; 
   }
 };
 
-// --- LOGIC FUNCTIONS ---
+// --- HELPER FUNCTIONS ---
 
-async function detectLayout(ai, imageElement) {
-  const base64 = getBase64FromImage(imageElement);
-  
-  const prompt = `
-    Analyze this timetable image layout. I need bounding boxes for:
-    1. "Time Slot Header" row.
-    2. Rows for "MON", "TUE", "WED", "THU", "FRI".
-    
-    Return ONLY valid JSON:
-    {
-      "header": { "x": 0, "y": 120, "w": 2000, "h": 80 },
-      "days": {
-        "MON": { "x": 0, "y": 200, "w": 2000, "h": 150 }
-      }
-    }
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash", // Use 2.0 Flash for speed
-    contents: [
-      { inlineData: { mimeType: "image/png", data: base64 } },
-      { text: prompt }
-    ],
-    generationConfig: { responseMimeType: "application/json" }
-  });
-
-  const cleanedText = cleanJsonString(response.text);
-  const parsed = JSON.parse(cleanedText);
-
-  return {
-    header: { fileIndex: 0, coords: parsed.header },
-    days: Object.keys(parsed.days).reduce((acc, key) => {
-      acc[key] = { fileIndex: 0, coords: parsed.days[key] };
-      return acc;
-    }, {})
-  };
-}
-
-async function extractDayData(ai, day, base64Image) {
-  const prompt = `
-  Image: Top row is Time Headers. Bottom row is ${day} Schedule.
-  
-  TASK: Extract data for ${day} as a JSON Array.
-  RULES:
-  1. Output format: [{"day": "${day}", "time": "8-9", "subject": "Math", "type": "L"}]
-  2. If a box spans columns (e.g. 10-12), create entries for 10-11 AND 11-12.
-  3. Include "day": "${day}" in every object.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash", 
-    contents: [
-      { inlineData: { mimeType: "image/png", data: base64Image } },
-      { text: prompt }
-    ],
-    generationConfig: { responseMimeType: "application/json" }
-  });
-
-  // Return the raw cleaned string so verification can read it
-  return cleanJsonString(response.text);
-}
-
-async function verifyExtraction(ai, day, base64Image, extractedJsonString) {
-  const prompt = `
-  Image: Timetable for ${day}.
-  Extracted JSON: ${extractedJsonString}
-
-  TASK: Check for MISSING items in the JSON compared to the image.
-  Return JSON: { "valid": true } OR { "valid": false, "correction": "Missing Lab G2 in 10-11" }
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash",
-    contents: [
-      { inlineData: { mimeType: "image/png", data: base64Image } },
-      { text: prompt }
-    ],
-    generationConfig: { responseMimeType: "application/json" }
-  });
-
-  const cleanedText = cleanJsonString(response.text);
-  const result = JSON.parse(cleanedText);
-  
-  if (result.valid) return { hasErrors: false };
-  return { hasErrors: true, correction: result.correction };
-}
-
-// --- HELPERS ---
-
-// Helper to strip Markdown code blocks
-function cleanJsonString(text) {
+const cleanJsonString = (text) => {
   let cleaned = text.trim();
   if (cleaned.startsWith('```json')) {
     cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
@@ -164,87 +86,20 @@ function cleanJsonString(text) {
     cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
   }
   return cleaned;
-}
-
-export const parseFromExtractedText = (rawText, userCoursesStr, userGroup) => {
-  let allEntries = [];
-  const validCourses = userCoursesStr.split(',').map(c => c.trim().toUpperCase());
-  
-  try {
-    const matches = rawText.match(/\[.*?\]/gs);
-    if (matches) {
-      matches.forEach(match => {
-        try {
-          const dayEntries = JSON.parse(match);
-          if (Array.isArray(dayEntries)) {
-            allEntries = [...allEntries, ...dayEntries];
-          }
-        } catch (e) { console.error("JSON parse error for chunk", e); }
-      });
-    }
-  } catch (e) {
-    console.error("Global parse error", e);
-    return [];
-  }
-
-  return allEntries.map(entry => ({
-      day: entry.day || "Unknown",
-      time: entry.time,
-      subject: entry.subject,
-      type: entry.type || "L"
-  })).filter(item => {
-    const subject = item.subject.toUpperCase();
-    const isElective = validCourses.some(c => subject.includes(c));
-    return isElective || subject.includes(userGroup); 
-  });
 };
 
-const fileToImage = (file) => {
+const fileToGenerativePart = (file) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = e.target.result;
+    reader.onloadend = () => {
+      // The SDK needs the base64 string without the prefix
+      const base64Data = reader.result.split(',')[1];
+      resolve({
+        mimeType: file.type,
+        data: base64Data
+      });
     };
+    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-};
-
-const cropImage = (image, coords) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = coords.w;
-  canvas.height = coords.h;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(image, coords.x, coords.y, coords.w, coords.h, 0, 0, coords.w, coords.h);
-  
-  const newImg = new Image();
-  return new Promise(resolve => {
-    newImg.onload = () => resolve(newImg);
-    newImg.src = canvas.toDataURL();
-  });
-};
-
-const stitchImages = (imgTop, imgBottom) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(imgTop.width, imgBottom.width);
-  canvas.height = imgTop.height + imgBottom.height;
-  const ctx = canvas.getContext('2d');
-  
-  ctx.fillStyle = "#FFFFFF";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(imgTop, 0, 0);
-  ctx.drawImage(imgBottom, 0, imgTop.height);
-  
-  return Promise.resolve(canvas.toDataURL().split(',')[1]);
-};
-
-const getBase64FromImage = (img) => {
-  const canvas = document.createElement('canvas');
-  canvas.width = img.width;
-  canvas.height = img.height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0);
-  return canvas.toDataURL().split(',')[1];
 };
