@@ -1,5 +1,5 @@
 const TIME_SLOTS = [
-  "8-9", "9-10", "10-11", "11-12", "12-1", 
+  "8-9", "9-10", "10-11", "11-12", "12-1",
   "1-2", "2-3", "3-4", "4-5", "5-6"
 ];
 
@@ -22,7 +22,7 @@ export function filterTimetable(timetable, courses, group) {
       .split(',')
       .map(c => c.trim().toUpperCase())
       .filter(Boolean);
-    
+
     const userGroup = group.trim().toUpperCase();
     const newGrid = {};
 
@@ -35,11 +35,11 @@ export function filterTimetable(timetable, courses, group) {
     // Process each timetable slot
     timetable.forEach(slot => {
       const distinctClasses = slot.raw_content.split(' || ');
-      
+
       const matchingClasses = distinctClasses.filter(classText => {
         const textUpper = classText.toUpperCase();
         const normalizedText = textUpper.replace(/\s+/g, '');
-        
+
         // Check if class matches any user course
         const hasCourseMatch = userCourses.some(course => {
           if (course.length <= 3) {
@@ -54,15 +54,19 @@ export function filterTimetable(timetable, courses, group) {
         if (!hasCourseMatch) return false;
 
         // Check group matching
-        const groupRegex = /G\s?\d/g;
+        // Matches G1, G2, P1, P2 etc. (case insensitive)
+        const groupRegex = /(?:G|P)\s?\d+/gi;
         const groupsFound = textUpper.match(groupRegex) || [];
-        const cleanGroups = groupsFound.map(g => g.replace(/\s/, ''));
+        // Normalize: "G 1" -> "G1", "P 2" -> "P2"
+        const cleanGroups = groupsFound.map(g => g.replace(/\s+/g, ''));
 
         if (cleanGroups.length > 0) {
-          const userGroupNum = userGroup.replace(/\D/g, '');
-          return cleanGroups.some(g => g.includes(userGroupNum));
+          // Strict match: User must provide specific group like "G1" or "P1"
+          // We compare the normalized user group (e.g. "P1") against found groups
+          const normalizedUserGroup = userGroup.replace(/\s+/g, '');
+          return cleanGroups.includes(normalizedUserGroup);
         }
-        
+
         // If no group specified in class, include it
         return true;
       });

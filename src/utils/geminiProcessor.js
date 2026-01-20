@@ -82,6 +82,7 @@ export const parseTimetable = async (apiKey, files) => {
     }
 
     console.log(`✅ Extracted ${parsedData.length} raw time slots.`);
+    console.log(parsedData);
     return parsedData;
 
   } catch (error) {

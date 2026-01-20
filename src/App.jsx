@@ -10,6 +10,7 @@ import Layout from './components/Layout';
 import LandingPage from './components/LandingPage';
 import TimetableView from './components/TimetableView';
 import About from './components/About';
+import FirstVisitPopup from './components/FirstVisitPopup';
 
 // --- CONFIGURATION ---
 const DAY_MAP = { "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5 };
@@ -26,6 +27,7 @@ export default function App() {
   const [error, setError] = useState('');
 
   const [showChillPopup, setShowChillPopup] = useState(false);
+  const [showFirstVisitPopup, setShowFirstVisitPopup] = useState(false);
   const [visitCount, setVisitCount] = useState(0);
 
   // Routing State: 'home' | 'timetable' | 'about'
@@ -38,11 +40,23 @@ export default function App() {
     if (month === 5 || month === 6) { // June or July
       setShowChillPopup(true);
     }
+
+    // Check First Visit
+    const hasVisited = localStorage.getItem('hasVisited');
+    if (!hasVisited) {
+      setShowFirstVisitPopup(true);
+    }
+
     const storedCount = localStorage.getItem('siteVisits');
     let newCount = storedCount ? parseInt(storedCount) + 1 : 1245;
     localStorage.setItem('siteVisits', newCount);
     setVisitCount(newCount);
   }, []);
+
+  const handleCloseFirstVisit = () => {
+    localStorage.setItem('hasVisited', 'true');
+    setShowFirstVisitPopup(false);
+  };
 
   // Filter timetable whenever dependencies change
   useEffect(() => {
@@ -285,6 +299,10 @@ export default function App() {
             <button onClick={() => setShowChillPopup(false)} className="mt-8 px-6 py-2 bg-[#F2F9F3] hover:bg-[#E2F0E5] rounded-full text-[#55875F] font-semibold text-sm transition-colors border border-[#C0DCCB]">Okay, I'll relax (Close)</button>
           </div>
         </div>
+      )}
+
+      {showFirstVisitPopup && (
+        <FirstVisitPopup onClose={handleCloseFirstVisit} />
       )}
 
       <Layout onNavigate={handleNavigate}>
