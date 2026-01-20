@@ -1,58 +1,86 @@
+const TIME_SLOTS = [
+  "8-9", "9-10", "10-11", "11-12", "12-1", 
+  "1-2", "2-3", "3-4", "4-5", "5-6"
+];
 
-export const filterTimetable = (rawTimetable, userCoursesStr, userGroup) => {
-  
-  const selectedCourses = userCoursesStr
-    .split(',')
-    .map(c => c.trim().toUpperCase())
-    .filter(c => c !== ''); 
+const DAYS = ["MON", "TUE", "WED", "THU", "FRI"];
 
-  const myGroup = userGroup.trim().toUpperCase();
+/**
+ * Filters timetable data based on user courses and group
+ * @param {Array} timetable - Raw timetable data from parser
+ * @param {string} courses - Comma-separated course codes (e.g., "PE302, PE304, HU302")
+ * @param {string} group - User's group identifier (e.g., "G3")
+ * @returns {Object} Grid data organized by day and time slot
+ */
+export function filterTimetable(timetable, courses, group) {
+  if (!timetable || timetable.length === 0) {
+    return {};
+  }
 
-  
-    const findGroupInText = (text) => {
-    const match = text.match(/\b(G[1-9])\b/i); 
-    return match ? match[1].toUpperCase() : null;
-  };
-
-  // 2. Process the Timetable
-  const filteredSlots = [];
-
-  rawTimetable.forEach(slot => {
-   
-    const items = slot.raw_content.split('||'); 
+  try {
+    const userCourses = courses
+      .split(',')
+      .map(c => c.trim().toUpperCase())
+      .filter(Boolean);
     
-    const keptItems = items.filter(item => {
-      const upperItem = item.toUpperCase();
+    const userGroup = group.trim().toUpperCase();
+    const newGrid = {};
 
-      
-      const hasCourse = selectedCourses.some(course => {
-        
-        return upperItem.includes(course);
-      });
-
-      if (!hasCourse) return false;
-
-      
-      const detectedGroup = findGroupInText(upperItem);
-      
-      if (detectedGroup) {
-       
-        return detectedGroup === myGroup;
-      }
-    
-      return true;
+    // Initialize empty grid
+    DAYS.forEach(day => {
+      newGrid[day] = {};
+      TIME_SLOTS.forEach(time => newGrid[day][time] = "");
     });
 
-    
-    if (keptItems.length > 0) {
-      filteredSlots.push({
-        day: slot.day,
-        time: slot.time,
+    // Process each timetable slot
+    timetable.forEach(slot => {
+      const distinctClasses = slot.raw_content.split(' || ');
+      
+      const matchingClasses = distinctClasses.filter(classText => {
+        const textUpper = classText.toUpperCase();
+        const normalizedText = textUpper.replace(/\s+/g, '');
         
-        content: keptItems.join(' / ').trim() 
-      });
-    }
-  });
+        // Check if class matches any user course
+        const hasCourseMatch = userCourses.some(course => {
+          if (course.length <= 3) {
+            // For short codes like E1, E2, use word boundary matching
+            const regex = new RegExp(`\\b${course}\\b`, 'i');
+            return regex.test(textUpper);
+          }
+          // For longer codes, use contains matching
+          return normalizedText.includes(course);
+        });
 
-  return filteredSlots;
-};
+        if (!hasCourseMatch) return false;
+
+        // Check group matching
+        const groupRegex = /G\s?\d/g;
+        const groupsFound = textUpper.match(groupRegex) || [];
+        const cleanGroups = groupsFound.map(g => g.replace(/\s/, ''));
+
+        if (cleanGroups.length > 0) {
+          const userGroupNum = userGroup.replace(/\D/g, '');
+          return cleanGroups.some(g => g.includes(userGroupNum));
+        }
+        
+        // If no group specified in class, include it
+        return true;
+      });
+
+      // Add matching classes to grid
+      if (matchingClasses.length > 0) {
+        const dayKey = slot.day.toUpperCase();
+        if (newGrid[dayKey]) {
+          newGrid[dayKey][slot.time] = matchingClasses.join('\n');
+        }
+      }
+    });
+
+    return newGrid;
+  } catch (err) {
+    console.error("Filtering error:", err);
+    return {};
+  }
+}
+
+export { TIME_SLOTS, DAYS };

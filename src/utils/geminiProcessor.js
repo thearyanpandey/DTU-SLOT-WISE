@@ -5,12 +5,12 @@ export const parseTimetable = async (apiKey, files) => {
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
-    
+
     const imageParts = await Promise.all(files.map(f => fileToGenerativePart(f)));
 
     console.log("🚀 Sending images to Gemini for Raw Extraction...");
 
-    
+
     const prompt = `
       You are a raw data extractor for university timetables.
       I have uploaded ${files.length} image(s) of timetable grids.
@@ -40,31 +40,45 @@ export const parseTimetable = async (apiKey, files) => {
       Return only valid JSON.
     `;
 
-    
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview", // Switched to a standard valid model name
       contents: [
         // Map images to the format expected by this SDK
-        ...imageParts.map(part => ({ 
-            inlineData: { 
-                mimeType: part.mimeType, 
-                data: part.data 
-            } 
+        ...imageParts.map(part => ({
+          inlineData: {
+            mimeType: part.mimeType,
+            data: part.data
+          }
         })),
         { text: prompt }
       ],
-      generationConfig: { 
-          responseMimeType: "application/json" 
+      generationConfig: {
+        responseMimeType: "application/json"
       }
     });
 
-    
-    const jsonString = cleanJsonString(response.text);
+    console.log("Raw Gemini Response Keys:", Object.keys(response || {}));
+
+    let rawText = "";
+    if (typeof response.text === 'function') {
+      rawText = response.text();
+    } else if (response.text) {
+      rawText = response.text;
+    } else if (response.candidates && response.candidates[0] && response.candidates[0].content && response.candidates[0].content.parts && response.candidates[0].content.parts[0].text) {
+      // Fallback for raw candidate structure
+      rawText = response.candidates[0].content.parts[0].text;
+    } else {
+      console.error("Unknown response structure:", JSON.stringify(response, null, 2));
+      throw new Error("Invalid response from Gemini AI. Please check API Key and try again.");
+    }
+
+    const jsonString = cleanJsonString(rawText);
     let parsedData = JSON.parse(jsonString);
 
     if (!Array.isArray(parsedData)) {
-        console.warn("AI did not return an array. Attempting to wrap.");
-        parsedData = [parsedData];
+      console.warn("AI did not return an array. Attempting to wrap.");
+      parsedData = [parsedData];
     }
 
     console.log(`✅ Extracted ${parsedData.length} raw time slots.`);
@@ -72,7 +86,7 @@ export const parseTimetable = async (apiKey, files) => {
 
   } catch (error) {
     console.error("Raw Processor Error:", error);
-    throw error; 
+    throw error;
   }
 };
 

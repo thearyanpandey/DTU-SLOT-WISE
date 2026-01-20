@@ -1,1 +1,36 @@
 @import "tailwindcss";
+
+@theme {
+    --font-sans: 'Outfit', sans-serif;
+    --color-brand-green-light: #F2F9F3;
+    --color-brand-green-medium: #E2F0E5;
+    --color-brand-green: #6AA374;
+    --color-brand-green-dark: #55875F;
+    --color-brand-bg: #F7F6F0;
+    --color-brand-text: #2D3436;
+}
+
+@layer base {
+  body {
+    @apply bg-brand-bg text-brand-text font-sans antialiased;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(106, 163, 116, 0.1) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(106, 163, 116, 0.15) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
+}
+
+/* Custom Scrollbar for cleaner look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
